@@ -1,0 +1,760 @@
+--[[
+    COMBINED SCRIPT - Optimized Order
+    1. Private Island Spawn
+    2. Mod+Affiliate Prevention Kick
+    3. Auto Roll
+    4. Auto Coin
+    5. Auto Chest
+    6. Anti AFK
+    7. Pet Killer
+    8. Fast Auto Potion
+]]
+
+--------------------------------------------------
+-- 1. PRIVATE ISLAND SPAWN (Highest Priority)
+--------------------------------------------------
+do
+    local CONFIG = {
+        CorruptedIslandTarget = Vector3.new(774, -108, 78),
+    }
+
+    local Players = game:GetService("Players")
+    local Workspace = game:GetService("Workspace")
+    local player = Players.LocalPlayer
+
+    local function startCorruptedIsland()
+        local islandFolder = Workspace:FindFirstChild("Island") or Workspace:WaitForChild("Island", 5)
+        if not islandFolder then
+            warn("[Island] Island folder not found")
+            return
+        end
+
+        local island = islandFolder:FindFirstChild("Corrupted Floating Island") 
+            or islandFolder:WaitForChild("Corrupted Floating Island", 5)
+        if not island then
+            warn("[Island] Corrupted Floating Island not found")
+            return
+        end
+
+        local targetPosition = CONFIG.CorruptedIslandTarget
+        if island:IsA("Model") then
+            island:PivotTo(CFrame.new(targetPosition))
+        elseif island:IsA("BasePart") then
+            island.CFrame = CFrame.new(targetPosition)
+        end
+
+        local obbyBadge = islandFolder:FindFirstChild("OBBY_Badge")
+        if obbyBadge then
+            obbyBadge:Destroy()
+        end
+
+        local folder = islandFolder:FindFirstChild("Folder")
+        if folder then
+            local meshPart = folder:FindFirstChild("MeshPart")
+            if meshPart then
+                meshPart:Destroy()
+            end
+        end
+
+        local children = island:GetChildren()
+        local target = children[45]
+        local targetCFrame
+
+        if target then
+            if target:IsA("BasePart") then
+                targetCFrame = target.CFrame
+            elseif target:IsA("Model") then
+                targetCFrame = target:GetPivot()
+            end
+        end
+
+        if not targetCFrame then
+            warn("[Island] Could not resolve child #45 for teleport target")
+            return
+        end
+
+        local function teleport(character)
+            local root = character:FindFirstChild("HumanoidRootPart") 
+                or character:WaitForChild("HumanoidRootPart", 2)
+            if root then
+                root.CFrame = targetCFrame + Vector3.new(0, 3, 0)
+            end
+        end
+
+        if player.Character then
+            teleport(player.Character)
+        end
+
+        player.CharacterAdded:Connect(function(newCharacter)
+            task.defer(function()
+                teleport(newCharacter)
+            end)
+        end)
+
+        print("[Island] Corrupted Floating Island system started (optimized)")
+    end
+
+    startCorruptedIsland()
+end
+
+--------------------------------------------------
+-- 2. MOD + AFFILIATE PREVENTION KICK
+--------------------------------------------------
+do
+    local Players = game:GetService("Players")
+    local LocalizationService = game:GetService("LocalizationService")
+    local LocalPlayer = Players.LocalPlayer
+
+    local CHECK_DENMARK = true
+    local CHECK_FRIENDS = true
+
+    local WATCHED_USERS = {
+        [502411265]  = "XenonRunner",
+        [4850716317] = "gzwcnrru3zzi",
+        [410049067]  = "Gul5678",
+        [411852385]  = "MikkeIse",
+    }
+
+    local KICKED = false
+    local checkedPlayers = {}
+    local countryCache = {}
+    local friendCache = {}
+
+    local function kick(reason)
+        if KICKED then return end
+        KICKED = true
+        warn("[WATCHER] " .. reason)
+        pcall(function()
+            LocalPlayer:Kick(reason)
+        end)
+    end
+
+    local function isFromDenmark(plr)
+        if not CHECK_DENMARK then return false end
+        if countryCache[plr.UserId] ~= nil then
+            return countryCache[plr.UserId]
+        end
+
+        local success, country = pcall(function()
+            return LocalizationService:GetCountryRegionForPlayerAsync(plr)
+        end)
+
+        if not success then
+            countryCache[plr.UserId] = false
+            return false
+        end
+
+        country = string.upper(tostring(country))
+        local result = country == "DK"
+        countryCache[plr.UserId] = result
+        return result
+    end
+
+    local function isFriendOfWatchedUser(plr)
+        if not CHECK_FRIENDS then return false end
+        if friendCache[plr.UserId] ~= nil then
+            return friendCache[plr.UserId]
+        end
+
+        for watchedUserId in pairs(WATCHED_USERS) do
+            local success, result = pcall(function()
+                return plr:IsFriendsWithAsync(watchedUserId)
+            end)
+
+            if success and result == true then
+                friendCache[plr.UserId] = true
+                return true
+            end
+            task.wait()
+        end
+
+        friendCache[plr.UserId] = false
+        return false
+    end
+
+    local function checkPlayer(plr)
+        if KICKED or not plr or plr == LocalPlayer then return end
+        if checkedPlayers[plr.UserId] then return end
+        checkedPlayers[plr.UserId] = true
+
+        if WATCHED_USERS[plr.UserId] then
+            kick("Watched player detected: " .. WATCHED_USERS[plr.UserId])
+            return
+        end
+
+        if isFromDenmark(plr) then
+            kick("Player from Denmark detected: " .. plr.Name)
+            return
+        end
+
+        if isFriendOfWatchedUser(plr) then
+            kick("Friend of watched player detected: " .. plr.Name)
+            return
+        end
+    end
+
+    task.spawn(function()
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if KICKED then break end
+            task.spawn(function()
+                checkPlayer(plr)
+            end)
+            task.wait()
+        end
+    end)
+
+    Players.PlayerAdded:Connect(function(plr)
+        task.spawn(function()
+            if KICKED then return end
+            if WATCHED_USERS[plr.UserId] then
+                kick("Watched player detected: " .. WATCHED_USERS[plr.UserId])
+                return
+            end
+            task.wait(0.2)
+            checkPlayer(plr)
+        end)
+    end)
+
+    print("[WATCHER] Active")
+end
+
+--------------------------------------------------
+-- 3. AUTO ROLL
+--------------------------------------------------
+task.spawn(function()
+    local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+    local remotes = ReplicatedStorage:WaitForChild("Remotes")
+    local introll = ReplicatedStorage:WaitForChild("introll")
+    local questRoll = remotes:WaitForChild("QuestRoll")
+
+    while true do
+        task.spawn(function()
+            pcall(function()
+                introll:Fire()
+            end)
+            pcall(function()
+                questRoll:InvokeServer()
+            end)
+        end)
+        task.wait(0.25)
+    end
+end)
+
+--------------------------------------------------
+-- 4. AUTO COIN
+--------------------------------------------------
+task.spawn(function()
+    task.wait(2)
+
+    for i, v in ipairs(game:GetService("Workspace"):GetDescendants()) do
+        if v.ClassName == "ProximityPrompt" then
+            v.HoldDuration = 0.01
+        end
+    end
+
+    local COIN_COOLDOWN = 2.99
+    local PROMPT_DURATION = 0
+    local HOP_AT_COINS_LEFT = 2
+
+    local Players = game:GetService("Players")
+    local RunService = game:GetService("RunService")
+    local TeleportService = game:GetService("TeleportService")
+    local workspace = game:GetService("Workspace")
+
+    local player = Players.LocalPlayer
+    local giftsFolder = workspace:WaitForChild("Collectibles")
+
+    task.spawn(function()
+        while task.wait(1.5) do
+            for i, v in ipairs(workspace:GetDescendants()) do
+                if v.ClassName == "ProximityPrompt" then
+                    v.HoldDuration = PROMPT_DURATION
+                end
+            end
+        end
+    end)
+
+    local function hasLuckPotion()
+        local backpack = player:FindFirstChildOfClass("Backpack")
+        if backpack and backpack:FindFirstChild("Luck_Potion") then
+            return true
+        end
+        local character = player.Character
+        if character and character:FindFirstChild("Luck_Potion") then
+            return true
+        end
+        return false
+    end
+
+    local function getRoot()
+        local char = player.Character or player.CharacterAdded:Wait()
+        return char:FindFirstChild("HumanoidRootPart")
+    end
+
+    local function claimGift(gift)
+        local root = getRoot()
+        if not root then return false end
+        if not gift or not gift.Parent or gift.Transparency >= 0.1 then return false end
+
+        local originalCFrame = gift.CFrame
+        gift.CFrame = root.CFrame
+
+        RunService.Stepped:Wait()
+        RunService.Stepped:Wait()
+
+        local prompt = gift:FindFirstChildWhichIsA("ProximityPrompt")
+            or gift:FindFirstChild("ProximityPrompt", true)
+
+        if prompt then
+            pcall(function()
+                fireproximityprompt(prompt)
+            end)
+        end
+
+        if gift and gift.Parent then
+            gift.CFrame = originalCFrame
+        end
+
+        if not gift or not gift.Parent or gift.Transparency > 0.9 then
+            return true
+        end
+        return false
+    end
+
+    local function getAvailableGifts()
+        local availableGifts = {}
+        for _, gift in ipairs(giftsFolder:GetChildren()) do
+            if gift:IsA("BasePart") and gift.Transparency < 0.1 then
+                table.insert(availableGifts, gift)
+            end
+        end
+        return availableGifts
+    end
+
+    local function serverHop()
+        pcall(function()
+            TeleportService:Teleport(game.PlaceId, player)
+        end)
+    end
+
+    while true do
+        local availableGifts = getAvailableGifts()
+
+        if #availableGifts <= HOP_AT_COINS_LEFT then
+            if hasLuckPotion() then
+                repeat task.wait(0.1) until not hasLuckPotion()
+            end
+            serverHop()
+            break
+        end
+
+        for _, gift in ipairs(availableGifts) do
+            local remaining = #getAvailableGifts()
+            if remaining <= HOP_AT_COINS_LEFT then
+                if hasLuckPotion() then
+                    repeat task.wait(0.1) until not hasLuckPotion()
+                end
+                serverHop()
+                return
+            end
+
+            if gift and gift.Parent and gift:IsA("BasePart") and gift.Transparency < 0.1 then
+                local success = claimGift(gift)
+                if success then
+                    task.wait(COIN_COOLDOWN)
+                end
+            end
+        end
+
+        task.wait()
+    end
+end)
+
+--------------------------------------------------
+-- 5. AUTO CHEST
+--------------------------------------------------
+do
+    local CONFIG = {
+        ChestReadyText = "Touch To Claim!",
+        ChestGuiName = "CommunityChestGUI",
+    }
+
+    local Players = game:GetService("Players")
+    local UserInputService = game:GetService("UserInputService")
+    local Workspace = game:GetService("Workspace")
+    local CoreGui = game:GetService("CoreGui")
+    local player = Players.LocalPlayer
+
+    local function getRootPart()
+        local character = player.Character or player.CharacterAdded:Wait()
+        return character:FindFirstChild("HumanoidRootPart") or character:WaitForChild("HumanoidRootPart")
+    end
+
+    local oldGui = CoreGui:FindFirstChild(CONFIG.ChestGuiName)
+    if oldGui then oldGui:Destroy() end
+
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = CONFIG.ChestGuiName
+    screenGui.ResetOnSpawn = false
+    screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    screenGui.IgnoreGuiInset = true
+    screenGui.Parent = CoreGui
+
+    local statusLabel = Instance.new("TextLabel")
+    statusLabel.Name = "Countdown"
+    statusLabel.AnchorPoint = Vector2.new(0.5, 1)
+    statusLabel.Position = UDim2.new(0.5, 0, 0.94, 0)
+    statusLabel.Size = UDim2.fromOffset(180, 28)
+    statusLabel.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+    statusLabel.BackgroundTransparency = 0.35
+    statusLabel.BorderSizePixel = 0
+    statusLabel.Font = Enum.Font.GothamMedium
+    statusLabel.TextSize = 14
+    statusLabel.TextColor3 = Color3.fromRGB(245, 245, 245)
+    statusLabel.Text = "Chest • --:--:--"
+    statusLabel.Parent = screenGui
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = statusLabel
+
+    local stroke = Instance.new("UIStroke")
+    stroke.Thickness = 1
+    stroke.Transparency = 0.7
+    stroke.Color = Color3.fromRGB(255, 255, 255)
+    stroke.Parent = statusLabel
+
+    local padding = Instance.new("UIPadding")
+    padding.PaddingLeft = UDim.new(0, 12)
+    padding.PaddingRight = UDim.new(0, 12)
+    padding.Parent = statusLabel
+
+    local dragging = false
+    local dragStart, startPos
+
+    statusLabel.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = statusLabel.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position - dragStart
+            statusLabel.Position = UDim2.new(
+                startPos.X.Scale,
+                startPos.X.Offset + delta.X,
+                startPos.Y.Scale,
+                startPos.Y.Offset + delta.Y
+            )
+        end
+    end)
+
+    local chest = Workspace:WaitForChild("GroupChest")
+    local touchPart = chest:WaitForChild("Touch")
+    local textLabel = chest:WaitForChild("Indicator"):WaitForChild("BillboardGui"):WaitForChild("TextLabel")
+
+    local claiming = false
+    local lastReady = false
+
+    local function claimChest()
+        if claiming then return end
+        claiming = true
+        local root = getRootPart()
+        if root and touchPart and touchPart.Parent then
+            firetouchinterest(touchPart, root, 0)
+            task.wait()
+            firetouchinterest(touchPart, root, 1)
+        end
+        claiming = false
+    end
+
+    local function update()
+        local text = textLabel.Text
+        if text == CONFIG.ChestReadyText then
+            statusLabel.Text = "Chest • Ready!"
+            statusLabel.TextColor3 = Color3.fromRGB(100, 255, 120)
+            if not lastReady then
+                claimChest()
+            end
+            lastReady = true
+        else
+            statusLabel.Text = "Chest • " .. text
+            statusLabel.TextColor3 = Color3.fromRGB(245, 245, 245)
+            lastReady = false
+        end
+    end
+
+    textLabel:GetPropertyChangedSignal("Text"):Connect(update)
+    update()
+
+    print("[Community Chest] Clean version started")
+end
+
+--------------------------------------------------
+-- 6. ANTI AFK
+--------------------------------------------------
+do
+    local Players = game:GetService("Players")
+    local VirtualUser = game:GetService("VirtualUser")
+    local player = Players.LocalPlayer
+
+    local backpack = player:FindFirstChild("Backpack") or player:WaitForChild("Backpack", 3)
+    if not backpack then
+        warn("[Anti-AFK] Backpack not found")
+    else
+        local itemName = "\240\159\146\164" -- 💰
+
+        local function removeTargetItem()
+            local item = backpack:FindFirstChild(itemName)
+            if item then
+                item:Destroy()
+            end
+        end
+
+        removeTargetItem()
+
+        backpack.ChildAdded:Connect(function(child)
+            if child.Name == itemName then
+                child:Destroy()
+            end
+        end)
+
+        player.CharacterAdded:Connect(function()
+            task.defer(removeTargetItem)
+        end)
+
+        player.Idled:Connect(function()
+            VirtualUser:CaptureController()
+            VirtualUser:ClickButton2(Vector2.zero)
+        end)
+
+        task.spawn(function()
+            while true do
+                task.wait(60)
+                pcall(function()
+                    VirtualUser:CaptureController()
+                    VirtualUser:ClickButton2(Vector2.zero)
+                end)
+            end
+        end)
+
+        print("[Anti-AFK] Started (optimized)")
+    end
+end
+
+--------------------------------------------------
+-- 7. PET KILLER
+--------------------------------------------------
+do
+    local Players = game:GetService("Players")
+    local player = Players.LocalPlayer
+
+    local playerScripts = player:WaitForChild("PlayerScripts")
+
+    local function deletePetHandler()
+        local petHandler = playerScripts:FindFirstChild("PetHandler")
+        if petHandler then
+            petHandler:Destroy()
+            print("[Cleanup] PetHandler deleted")
+        end
+    end
+
+    deletePetHandler()
+
+    playerScripts.ChildAdded:Connect(function(child)
+        if child.Name == "PetHandler" then
+            task.wait()
+            if child.Parent then
+                child:Destroy()
+            end
+            print("[Cleanup] PetHandler was re-added and deleted again")
+        end
+    end)
+
+    task.spawn(function()
+        while task.wait(5) do
+            deletePetHandler()
+        end
+    end)
+
+    print("[Cleanup] PetHandler killer is running")
+end
+
+--------------------------------------------------
+-- 8. FAST AUTO POTION
+--------------------------------------------------
+task.spawn(function()
+    for i,v in ipairs(game:GetService("Workspace"):GetDescendants()) do   
+        if v.ClassName == "ProximityPrompt" then   
+            v.HoldDuration = 0  
+        end   
+    end  
+
+    local RETRY_DELAY = 0.01
+    local SEARCH_WAIT = 1
+    local BETWEEN_DROPS = 1
+    local GROUND_CHECK_HEIGHT = 10
+    local STAY_TIME = 0.01
+    local MAX_ATTEMPTS_PER_DROP = 1
+
+    task.spawn(function()   
+        while task.wait(1) do
+            for i,v in ipairs(game:GetService("Workspace"):GetDescendants()) do   
+                if v.ClassName == "ProximityPrompt" then   
+                    v.HoldDuration = 0   
+                end   
+            end   
+        end   
+    end)  
+
+    local Players = game:GetService("Players")   
+    local RunService = game:GetService("RunService")
+    local workspace = game:GetService("Workspace")  
+    local player = Players.LocalPlayer   
+
+    local alreadyCollected = {}
+    local attemptCount = {}
+
+    local function getRoot()   
+        local char = player.Character or player.CharacterAdded:Wait()   
+        return char:FindFirstChild("HumanoidRootPart")   
+    end  
+
+    local function hasLuckPotion()
+        local char = player.Character
+        local backpack = player:FindFirstChild("Backpack")
+        if char and char:FindFirstChild("Luck_Potion") then
+            return char.Luck_Potion
+        end
+        if backpack and backpack:FindFirstChild("Luck_Potion") then
+            return backpack.Luck_Potion
+        end
+        return nil
+    end
+
+    local function drinkPotionFully()
+        while true do
+            local tool = hasLuckPotion()
+            if not tool then break end
+            local char = player.Character
+            local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+            if not humanoid then break end
+            if tool.Parent ~= char then
+                pcall(function()
+                    humanoid:EquipTool(tool)
+                end)
+                task.wait(0.1)
+            end
+            pcall(function()
+                tool:Activate()
+            end)
+            task.wait(1.33)
+        end
+    end
+
+    local function isOnGround(drop)
+        local part = drop.PrimaryPart or drop:FindFirstChildWhichIsA("BasePart")
+        if not part then return false end
+        if part.AssemblyLinearVelocity.Y < -1.5 then return false end
+
+        local rayParams = RaycastParams.new()
+        rayParams.FilterType = Enum.RaycastFilterType.Exclude
+        rayParams.FilterDescendantsInstances = {drop, player.Character}
+
+        local result = workspace:Raycast(part.Position + Vector3.new(0, 2, 0), Vector3.new(0, -GROUND_CHECK_HEIGHT, 0), rayParams)
+        if result then
+            return (part.Position - result.Position).Magnitude < 7
+        end
+        return false
+    end
+
+    local function claimDrop(drop)   
+        if alreadyCollected[drop] then return false end
+        attemptCount[drop] = (attemptCount[drop] or 0) + 1
+
+        if attemptCount[drop] > MAX_ATTEMPTS_PER_DROP then
+            alreadyCollected[drop] = true
+            print("[Drop] Gave up on this Drop after", MAX_ATTEMPTS_PER_DROP, "attempts")
+            return false
+        end
+
+        local root = getRoot()   
+        if not root then return false end  
+
+        local part = drop.PrimaryPart or drop:FindFirstChildWhichIsA("BasePart")
+        if not part then return false end
+        if not isOnGround(drop) then return false end
+
+        local originalCFrame = root.CFrame
+        root.CFrame = part.CFrame + Vector3.new(0, 3, 0)
+
+        local prompt = nil
+        local start = tick()
+        repeat
+            prompt = drop:FindFirstChildWhichIsA("ProximityPrompt", true)
+            RunService.Stepped:Wait()
+        until prompt or tick() - start > 1.3
+
+        if prompt then
+            prompt.HoldDuration = 0
+            pcall(function() fireproximityprompt(prompt) end)
+            task.wait(0.25)
+            pcall(function() fireproximityprompt(prompt) end)
+        end
+
+        task.wait(STAY_TIME)
+        root.CFrame = originalCFrame
+
+        if hasLuckPotion() then
+            alreadyCollected[drop] = true
+            print("[Drop] Successfully got Luck_Potion")
+            return true
+        end
+
+        if attemptCount[drop] >= MAX_ATTEMPTS_PER_DROP then
+            alreadyCollected[drop] = true
+            print("[Drop] Max attempts reached, skipping this Drop from now on")
+        end
+
+        return false  
+    end  
+
+    print("[Drop Collector] Started")
+
+    while true do
+        if hasLuckPotion() then
+            drinkPotionFully()
+            task.wait(1)
+        end
+
+        local drops = {}
+        for _, v in ipairs(workspace:GetDescendants()) do
+            if v.Name == "Drop" and v:IsA("Model") and not alreadyCollected[v] then
+                table.insert(drops, v)
+            end
+        end
+
+        if #drops == 0 then
+            task.wait(SEARCH_WAIT)
+        else
+            for _, drop in ipairs(drops) do
+                if drop and drop.Parent and isOnGround(drop) then
+                    claimDrop(drop)
+                    task.wait(BETWEEN_DROPS)
+                end
+            end
+            task.wait(2)
+        end
+    end
+end)
+
+print("=== ALL SCRIPTS LOADED ===")
